@@ -4,6 +4,8 @@ var mongoose = require('mongoose');
 var app = express();
 var cityData = require('./models/cityData');
 var request = require('request');
+var redis = require('redis');
+
 const solr = require('solr-client');
 const client = solr.createClient({
   host: '127.0.0.1',
@@ -12,7 +14,8 @@ const client = solr.createClient({
 });
 client.autoCommit = true;
 
-
+const REDIS_PORT = 6379;
+const red_client = redis.createClient(REDIS_PORT);
 
 mongoose.connect(process.env.database, {useNewUrlParser: true, connectWithNoPrimary: true, useUnifiedTopology: true } , function(err){
     if(err){
@@ -46,8 +49,20 @@ app.get('/test/:id/:st', (req,res) => {
  
   
 });
-
-app.get('/', (req, res) => {
+function cache(req,res,next){
+  const cache_key=req.query.city;
+  red_client.get(cache_key,(err,data)=>{
+    if(err) throw err;
+    if(data!=null){
+      console.log('Cached...');
+      res.send(JSON.parse(data));
+    }
+    else{
+      next();
+    }
+  })
+}
+app.get('/', cache, (req, res) => {
   const qcity = req.query.city;
   if(qcity){
     var query = client.createQuery().q({cityName: qcity + ' OR stateName:' + qcity + ' OR aliasCityName:' + qcity}).sort({weightage:'asc'});
@@ -55,6 +70,11 @@ app.get('/', (req, res) => {
       if(err){
         console.log(err);
       }else{
+        console.log('From solr...');
+        var cache_value = JSON.stringify(obj);
+        //console.log(cache_value);
+        red_client.setex(qcity,3600,cache_value);
+        //console.log(JSON.parse(JSON.stringify(obj)));
         res.setHeader('Content-Type', 'application/json');
         res.json(obj);
       }
