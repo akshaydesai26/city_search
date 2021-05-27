@@ -49,6 +49,29 @@ app.get('/test/:id/:st', (req,res) => {
  
   
 });
+
+async function checkCache(qcity,data){
+  var query = await client.createQuery().q({cityName: qcity + ' OR stateName:' + qcity + ' OR aliasCityName:' + qcity}).sort({weightage:'asc'});
+  client.search(query,function(err, obj){
+    if(err){
+      console.log(err);
+    }else{
+      console.log('Comparing solr and cache...');
+      var cache_value = JSON.stringify(obj);
+      var cache_temp = JSON.parse(cache_value).response;
+      console.log(JSON.parse(data).response);
+      console.log('-------------------');
+      console.log(cache_temp);
+      if(JSON.stringify(JSON.parse(data).response)!=JSON.stringify(cache_temp)){
+        red_client.setex(qcity,3600,cache_value);
+        console.log('Cache data updated');
+      }
+      else{
+        console.log('Same value in cache');
+      }
+    }
+  });
+}
 function cache(req,res,next){
   const cache_key=req.query.city;
   red_client.get(cache_key,(err,data)=>{
@@ -56,6 +79,9 @@ function cache(req,res,next){
     if(data!=null){
       console.log('Cached...');
       res.send(JSON.parse(data));
+      setTimeout(function(){
+        checkCache(cache_key, data)
+      },5000);
     }
     else{
       next();
@@ -100,21 +126,30 @@ app.get('/update/:cityCode/', (req, res) => {
         if(err) throw err;
         else{
           // implement update call
-          client.add({ cityCode : city.cityCode, cityName : city.cityName,  stateName : city.stateName, locationType : city.locationType, aliasCityName : city.aliasCityName, weightage : city.weightage }, function(err,obj){
-            if (err) {
-               console.log(err);
-            } else {
-               res.send(obj);
-               console.log(obj);
-               client.softCommit(function(err,res){
-                if(err){
-                  console.log(err);
-                }else{
-                  console.log(res);
+          var query = client.createQuery().q({cityCode: req.params.cityCode});
+          client.search(query,function(err, obj){
+            if(err){
+              console.log(err);
+            }else{
+              console.log();
+              client.add({ id : obj.response.docs[0].id, cityCode : city.cityCode, cityName : city.cityName,  stateName : city.stateName, locationType : city.locationType, aliasCityName : city.aliasCityName, weightage : city.weightage }, function(err,obj){
+                if (err) {
+                   console.log(err);
+                } else {
+                   res.send(obj);
+                   console.log(obj);
+                   client.softCommit(function(err,res){
+                    if(err){
+                      console.log(err);
+                    }else{
+                      console.log(res);
+                    }
+                 });
                 }
-             });
+              });
             }
           });
+
         }
       });
       
